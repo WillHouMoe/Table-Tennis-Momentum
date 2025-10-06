@@ -39,7 +39,7 @@ std::vector<PointInfo> all_points;
 // 常量定义
 const double alpha = 0.33;    // 当前局内衰减系数
 const double beta = 0.5;      // 跨局衰减系数
-const int WINDOW_SIZE = 5;    // 势能计算窗口
+const int WINDOW_SIZE = 11;    // 势能计算窗口
 
 // 初始化球员数据
 std::vector<Player> initializePlayers() {
