@@ -3,132 +3,124 @@
 # * explanation: unknown error
 # * version explanation: plot
 
-import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from collections import namedtuple
-import random
 
-# 函数：判断一局是否结束（乒乓球11分制，领先2分获胜）
-def is_game_over(score1, score2):
-    max_score = max(score1, score2)
-    min_score = min(score1, score2)
-    if max_score >= 11 and max_score - min_score >= 2:
-        return 1 if score1 > score2 else 2  # 1=樊振东胜，2=张本智和胜
-    return 0
+# --------------------------
+# 1. 数据读取与预处理
+# --------------------------
+# 读取output.txt，处理多空格分隔，跳过开头的分隔线（skiprows=1）
+# 手动指定列名（确保与文档2的字段完全匹配）
+columns = ["Point #N", "Game", "Score(H:F)", "L_i", "G_A", "G_B", "M_A", "M_B", "Elo_H", "Elo_F"]
+df = pd.read_csv(
+    "output.txt",  # 请确保该文件与代码在同一目录下，否则需写完整路径（如"D:/data/output.txt"）
+    sep="\s+",     # 处理多空格分隔
+    skiprows=1,    # 跳过开头的"--------"分隔线
+    header=None,   # 原始数据第一行（非分隔线）为列名，故先设为None
+    names=columns  # 手动赋值列名
+)
 
-# 函数：蒙特卡洛模拟实时获胜概率
-def winning_rate(pot1, pot2, scr1, scr2, batch_size=10000):
-    win1, win2 = 0, 0
-    for _ in range(batch_size):
-        cur1, cur2 = scr1, scr2
-        while not is_game_over(cur1, cur2):
-            dice = random.uniform(0.0, pot1 + pot2)
-            cur1 += 1 if dice <= pot1 else 0
-            cur2 += 1 if dice > pot1 else 0
-        win1 += 1 if is_game_over(cur1, cur2) == 1 else 0
-        win2 += 1 if is_game_over(cur1, cur2) == 2 else 0
-    return win1 / batch_size, win2 / batch_size
+# 提取核心数据：横轴（累计得分数）、纵轴（双方势能）
+x = df["Point #N"]       # 横轴：累计得分数（Point #N）
+y1 = df["M_A"]           # 纵轴1：球员A势能（对应张本智和，Elo_H）
+y2 = df["M_B"]           # 纵轴2：球员B势能（对应樊振东，Elo_F）
 
-# 常量与得分序列定义
-PLAYER_A_NAME = "Fan Zhendong"  # 对应原代码中 'F'
-PLAYER_B_NAME = "Harimoto"  # 对应原代码中 'H'
-ALPHA = 0.33        # 局内衰减系数
-BETA = 0.5          # 跨局衰减系数（比局内衰减更快）
-POT1 = 0.45         # 樊振东基础得分权重
-POT2 = 0.55         # 张本智和基础得分权重
-WINDOW_SIZE = 5     # 势能计算窗口（当前球 + 前4球）
 
-def get_game_score_seqs():
-    """按局返回得分序列，'F'=樊振东得分，'H'=张本智和得分"""
-    return [
-        "HFHHHHHHHHHFH",        # 第1局
-        "HHFFHFFFHHFHHHFFHFHH", # 第2局
-        "FFFFFFHHFHFFFHF",      # 第3局
-        "HFHFFHHHFFHHFFFFFF",   # 第4局
-        "HHHHFFHHHFHHFHH",      # 第5局
-        "FHFFHFFFHHFHHHFFFF",   # 第6局
-        "FFHHHHFFFFHHHFFFFF"    # 第7局
-    ]
+# --------------------------
+# 2. 图表绘制与美化
+# --------------------------
+# 设置中文字体（避免中文乱码）
+plt.rcParams['font.sans-serif'] = ['SimHei']  # 兼容Windows和Linux
+plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
-# 存储每一分元数据的结构
-PointInfo = namedtuple('PointInfo', ['G_A', 'G_B', 'game_idx'])
+# 创建画布（调整尺寸，确保横轴数据显示完整）
+fig, ax = plt.subplots(figsize=(14, 7))  # 宽14英寸，高7英寸
 
-def main():
-    game_seqs = get_game_score_seqs()
-    all_points = []          # 存储所有分的杠杆与局信息
-    ma_values = []           # 樊振东的势能序列
-    mb_values = []           # 张本智和的势能序列
-    point_indices = []       # 得分点序号（用于x轴）
-    game_boundaries = [0]    # 局分界点（第几个球）
+# 绘制双折线：势能走势
+line1 = ax.plot(
+    x, y1,
+    label="张本智和",  # 标签：球员+数据字段对应关系
+    color="#1f77b4",  # 蓝色（区分双方）
+    linewidth=1.8,    # 线条粗细
+    alpha=0.8         # 透明度（避免过于刺眼）
+)
+line2 = ax.plot(
+    x, y2,
+    label="樊振东",
+    color="#ff7f0e",  # 橙色
+    linewidth=1.8,
+    alpha=0.8
+)
 
-    for game_idx, seq in enumerate(game_seqs):
-        scrA, scrB = 0, 0    # 本局内得分（每局重置）
-        for winner_char in seq:
-            total_point = len(point_indices) + 1
-            point_indices.append(total_point)
+# --------------------------
+# 3. 关键信息标注（参考image.png样式）
+# --------------------------
+# 3.1 轴标签与标题
+ax.set_xlabel("累计得分数（Point #N）", fontsize=12, fontweight="bold")
+ax.set_ylabel("势能（M_A / M_B）", fontsize=12, fontweight="bold")
+ax.set_title(
+    "张本智和 vs 樊振东 势能走势图",
+    fontsize=16,
+    fontweight="bold",
+    pad=20  # 标题与图表的间距
+)
 
-            # 1. 计算当前分的杠杆 L_i（实时获胜概率差）
-            if winner_char == 'H':  # 张本智和得分
-                rtwp_win, _ = winning_rate(POT1, POT2, scrA + 1, scrB)
-                _, rtwp_lose = winning_rate(POT1, POT2, scrA, scrB + 1)
-            else:  # 樊振东得分
-                rtwp_win, _ = winning_rate(POT1, POT2, scrA + 1, scrB)
-                _, rtwp_lose = winning_rate(POT1, POT2, scrA, scrB + 1)
-            L_i = rtwp_win - rtwp_lose
+# 1. 设置x轴刻度位置：从0开始，每隔50取一个值，直到覆盖最大累积分数（避免刻度超出数据范围）
+ax.set_xticks(range(0, int(max(x)) + 20, 20))  # max(x)是最大累积分数（如117），+50确保最后一个刻度覆盖数据
 
-            # 2. 计算杠杆获取量 G_A（樊振东）、G_B（张本智和）
-            ga = L_i if winner_char == 'F' else 0.0
-            gb = -L_i if winner_char == 'H' else 0.0
-            all_points.append(PointInfo(G_A=ga, G_B=gb, game_idx=game_idx))
+# 2. （可选）强制x轴范围左边界为0（让“0”刻度对齐更美观，避免左边界从1开始导致0刻度悬空）
+ax.set_xlim(0, max(x))  # 左边界0，右边界为最大累积分数（如117）
 
-            # 3. 更新本局比分
-            scrA += 1 if winner_char == 'F' else 0
-            scrB += 1 if winner_char == 'H' else 0
+# 3.2 网格线（辅助读取数据）
+ax.grid(True, alpha=0.3, linestyle="--")  # 虚线网格，透明度0.3
 
-            # 4. 计算势能 M_A（樊振东）、M_B（张本智和）
-            numerator_a, numerator_b, denominator = 0.0, 0.0, 0.0
-            current_idx = len(all_points) - 1
-            start_idx = max(0, current_idx - (WINDOW_SIZE - 1))
-            for k in range(start_idx, current_idx + 1):
-                p = all_points[k]
-                distance = current_idx - k
-                # 同局用ALPHA衰减，跨局用BETA衰减（更快）
-                decay = (1 - ALPHA) if p.game_idx == game_idx else (1 - BETA)
-                weight = decay ** distance
-                numerator_a += p.G_A * weight
-                numerator_b += p.G_B * weight
-                denominator += weight
-            m_a = numerator_a / denominator if denominator != 0 else 0.0
-            m_b = numerator_b / denominator if denominator != 0 else 0.0
-            ma_values.append(m_a)
-            mb_values.append(m_b)
+# # 3.3 排名标注（参考image.png的"Current ranking"）
+# # 位置可根据实际数据调整（x取中间值，y取势能较高处，避免遮挡）
+# ax.text(
+#     x=60,  # 横轴位置（第60分附近）
+#     y=max(y1.max(), y2.max()) - 0.03,  # 纵轴位置（略低于最大势能）
+#     s="当前排名：1（张本智和）",
+#     color="#1f77b4",
+#     fontsize=11,
+#     fontweight="bold",
+#     bbox=dict(boxstyle="round,pad=0.3", facecolor="#e8f4fd", alpha=0.7)  # 带背景框，更醒目
+# )
+# ax.text(
+#     x=60,
+#     y=max(y1.max(), y2.max()) - 0.06,
+#     s="当前排名：2（樊振东）",
+#     color="#ff7f0e",
+#     fontsize=11,
+#     fontweight="bold",
+#     bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff3e0", alpha=0.7)
+# )
 
-        # 记录本局结束的得分点（用于绘制局间虚线）
-        game_boundaries.append(len(point_indices))
+# 3.4 图例（区分两条线）
+ax.legend(
+    loc="upper right",  # 图例位置（右上角，不遮挡数据）
+    fontsize=10,
+    frameon=True,
+    fancybox=True,  # 圆角图例框
+    shadow=True     # 阴影效果
+)
 
-    print(ma_values)
+# # 3.5 调整轴范围（让数据更舒展，避免边缘挤压）
+# y_min = min(y1.min(), y2.min()) - 0.05  # 纵轴最小值（留0.05余量）
+# y_max = max(y1.max(), y2.max()) + 0.05  # 纵轴最大值（留0.05余量）
+# ax.set_ylim(y_min, y_max)
+# ax.set_xlim(x.min(), x.max())  # 横轴范围：从第1分到最后1分
 
-    print(mb_values)
 
-    # # --------------------- 绘制势能走势图 ---------------------
-    # plt.figure(figsize=(12, 6))
-    # # 樊振东的势能
-    # plt.plot(point_indices, ma_values, label=PLAYER_A_NAME,
-    #          color="#FF6B6B", linewidth=2)
-    # # 张本智和的势能
-    # plt.plot(point_indices, mb_values, label=PLAYER_B_NAME,
-    #          color="#45B798", linewidth=2)
-    # # 局间分隔虚线
-    # for boundary in game_boundaries[1:-1]:  # 排除首尾（起点和终点）
-    #     plt.axvline(x=boundary, color="gray", linestyle="--", alpha=0.7)
-    # # 图表样式设置
-    # plt.title("Tokyo Olympic (Fan Zhendong vs Harimoto) Potential(M)", fontsize=15)
-    # plt.xlabel("Points", fontsize=12)
-    # plt.ylabel("Potential(M)", fontsize=12)
-    # plt.legend(fontsize=12)
-    # plt.grid(alpha=0.3)
-    # plt.tight_layout()
-    # plt.show()
+# --------------------------
+# 4. 保存与显示
+# --------------------------
+# 保存图片（高分辨率，避免标签截断）
+plt.tight_layout()  # 自动调整布局，防止标签被截断
+plt.savefig(
+    "双方势能走势图.png",
+    dpi=300,          # 分辨率300dpi（高清）
+    bbox_inches="tight"  # 紧凑布局，避免白边过大
+)
 
-if __name__ == "__main__":
-    main()
+# 显示图片（运行代码时会弹出窗口）
+plt.show()

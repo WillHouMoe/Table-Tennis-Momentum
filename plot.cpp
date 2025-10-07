@@ -157,6 +157,8 @@ double calc_leverage(int scr1, int scr2, int game_idx) {
 }
 
 int main() {
+    freopen("output.txt", "w", stdout);
+
     std::vector<std::string> game_seqs = get_game_score_seqs();
     int total_point = 0;
 
