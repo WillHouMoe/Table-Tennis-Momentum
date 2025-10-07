@@ -65,6 +65,15 @@ const std::vector<std::string> get_game_score_seqs() {
     };
 } // * passed
 
+void print(std::vector<PointInfo> points) {
+    std::cout << "-------------------PointInfo----------------------\n";
+    std::cout << "GameIDX\t" << "G_A\t" << "G_B\t" << "M_A\t" << "M_B\n";
+    for (auto p : points) {
+        std::cout << p.game_idx << '\t' << p.G_A << '\t' << p.G_B << '\t' << p.M_A << '\t' << p.M_B << '\n';
+    }
+    std::cout << "-------------------PointInfoEnd-------------------\n";
+}
+
 double sigmoid(double x) {
     return 1.0 / (1.0 + std::exp(-x));
 }
@@ -93,6 +102,20 @@ double calculateEloRating(const Player& player, double M_self, double delta_M,
     double elo = (player.cap * w_cap + (M_self * w_M - delta_M * w_delta_M * (1 - player.psy))) * player.sta;
     return sigmoid(elo);
 } // * passed
+
+std::tuple<int, int> consecutive_scoring(std::vector<PointInfo>& points) {
+    if (points.size() == 0) return {0, 0};
+    PointInfo p = points.back();
+    int scorer = p.G_A ? 1 : 2;
+    int pos = points.size() - 1, cnt = 0;
+    while (points[pos].game_idx == p.game_idx) {
+        int cur_scorer = (points[pos].G_A) ? 1 : 2;
+        if (cur_scorer == scorer) cnt++;
+        else break;
+        pos--;
+    }
+    return {cnt, scorer};
+}
 
 // 计算momentum，返回的五个参数：M_A, M_B
 std::tuple<double, double> calc_momentum(std::vector<PointInfo>& points, int game_idx) {
@@ -156,6 +179,7 @@ std::tuple<double, double, double> winningRate(int scr1, int scr2, int game_idx)
             cnt++;
             calc_momentum(sim_points, game_idx);
         }
+        // if (game_idx >= 2) print(sim_points);
         avg_cnt += cnt;
         if (isGameOver(cur_scr1, cur_scr2) == 1) {
             win1++;

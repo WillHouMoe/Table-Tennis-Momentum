@@ -65,6 +65,18 @@ const std::vector<std::string> get_game_score_seqs() {
     };
 } // * passed
 
+double sigmoid(double x) {
+    return 1.0 / (1.0 + std::exp(-x));
+}
+
+double calc_exponential_decay(double x) {
+    // 0.9 * e^(-0.5*(x-1)) + 0.1
+    double exponent = -0.5 * (x - 1.0);
+    double expResult = exp(exponent);
+    double functionValue = 0.9 * expResult + 0.1;
+    return functionValue;
+}
+
 // 判断一局是否结束（乒乓球11分制，领先2分获胜）
 int isGameOver(int score1, int score2) {
     int maxScore = std::max(score1, score2);
@@ -77,9 +89,9 @@ int isGameOver(int score1, int score2) {
 
 // 计算elo评分
 double calculateEloRating(const Player& player, double M_self, double delta_M,
-                         double w_cap = 0.6, double w_M = 0.2, double w_delta_M = 0.2) {
+                         double w_cap = 0.7, double w_M = 0.2, double w_delta_M = 0.1) {
     double elo = (player.cap * w_cap + (M_self * w_M - delta_M * w_delta_M * (1 - player.psy))) * player.sta;
-    return std::max(0.0, std::min(1.0, elo));
+    return sigmoid(elo);
 } // * passed
 
 // 计算momentum，返回的五个参数：M_A, M_B
@@ -105,11 +117,13 @@ std::tuple<double, double> calc_momentum(std::vector<PointInfo>& points, int gam
 }
 
 // 使用elo评分计算实时获胜概率（新增当前局索引和当前分索引参数）
-PDD winningRate(int scr1, int scr2, int game_idx) {
+std::tuple<double, double, double> winningRate(int scr1, int scr2, int game_idx) {
     int batch_size = 10000;
     int win1 = 0, win2 = 0;
+    double avg_cnt = 0;
     for (int i = 1; i <= batch_size; i++) {
         int cur_scr1 = scr1, cur_scr2 = scr2;
+        int cnt = 0;
         std::vector<PointInfo> sim_points;
         for (auto p : all_points) {
             if (p.game_idx < game_idx - 1) continue;
@@ -139,25 +153,29 @@ PDD winningRate(int scr1, int scr2, int game_idx) {
                 cur_scr2++;
                 sim_points.emplace_back(0.0, -current_elo2, 0.0, 0.0, game_idx);
             }
+            cnt++;
             calc_momentum(sim_points, game_idx);
         }
+        avg_cnt += cnt;
         if (isGameOver(cur_scr1, cur_scr2) == 1) {
             win1++;
         } else {
             win2++;
         }
     }
-    return {1.0 * win1 / batch_size, 1.0 * win2 / batch_size};
+    return {1.0 * win1 / batch_size, 1.0 * win2 / batch_size, avg_cnt / batch_size};
 }
 
 double calc_leverage(int scr1, int scr2, int game_idx) {
-    double rtwp_win = winningRate(scr1 + 1, scr2, game_idx).first;
-    double rtwp_lose = winningRate(scr1, scr2 + 1, game_idx).first;
-    return rtwp_win - rtwp_lose;
+    auto [rtwp_win, _1, _2] = winningRate(scr1 + 1, scr2, game_idx);
+    auto [rtwp_lose, _3, _4] = winningRate(scr1, scr2 + 1, game_idx);
+    auto [_5, _6, weight] = winningRate(scr1, scr2, game_idx);
+    weight = calc_exponential_decay(weight);
+    return std::min((rtwp_win - rtwp_lose) * weight, 0.2);
 }
 
 int main() {
-    freopen("output.txt", "w", stdout);
+    freopen("output_model_0_4.txt", "w", stdout);
 
     std::vector<std::string> game_seqs = get_game_score_seqs();
     int total_point = 0;
@@ -166,7 +184,6 @@ int main() {
     std::cout << "Point #N\tGame\tScore(" << playerA.id << ":" << playerB.id
               << ")\tL_i\t\tG_A\t\tG_B\t\tM_A\t\tM_B\t\tElo_" << playerA.id
               << "\t\tElo_" << playerB.id << "\n";
-    std::cout << "-----------------------------------------------------------------------------------------------------------------------------------------------------------------\n";
 
     for (int game_idx = 0; game_idx < game_seqs.size(); ++game_idx) {
         const std::string& seq = game_seqs[game_idx];
