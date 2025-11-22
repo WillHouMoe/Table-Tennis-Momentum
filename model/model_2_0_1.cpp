@@ -238,7 +238,11 @@ double monte_carlo_simulation(int current_game,
         std::vector<PointInfo> sim_historyA = historyA;
         std::vector<PointInfo> sim_historyB = historyB;
 
-        int game_over = 0;
+        int game_over = is_game_over(sim_scrA, sim_scrB);
+        if (game_over) {  // 初始比分已结束，直接判定胜负
+            a_wins += (game_over == 1);
+            continue;  // 跳过后续模拟循环
+        }
 
         while (!game_over) {
             double eloA = calc_elo(playerA.id, sim_game, sim_scrA, sim_scrB, playerA, sim_historyA);
@@ -255,7 +259,7 @@ double monte_carlo_simulation(int current_game,
             // 计算暂停相关的参数
             bool post_pause = false;
             double a_advantage = 0.0, b_advantage = 0.0;
-            int delta = sim_total_points - pause_total_points; // 暂停后经过的分数
+            int delta = sim_total_points - pause_total_points - 1; // 暂停后经过的分数
 
             if (pause_caller != 0 && delta >= 0) {
                 post_pause = true;
@@ -300,7 +304,9 @@ int main() {
               << std::setw(10) << "scrB"
               << std::setw(15) << "A_NO_PAUSE"
               << std::setw(15) << "B_NO_PAUSE"
-              << std::setw(15) << "A_PAUSE" << std::endl;
+              << std::setw(15) << "A_PAUSE"
+              << std::setw(15) << "B_PAUSE"
+              << std::endl;
     std::cout << std::string(90, '-') << std::endl;
 
     for (int game_idx = 0; game_idx < game_seqs.size(); game_idx++) {
@@ -320,7 +326,9 @@ int main() {
                           << std::setw(10) << scrB
                           << std::setw(15) << "undefined"
                           << std::setw(15) << "undefined"
-                          << std::setw(15) << "undefined" << std::endl;
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined"
+                          << std::endl;
                 continue;
             }
 
@@ -330,6 +338,7 @@ int main() {
 
             // 2. A叫暂停的胜率（pause_caller=1，暂停发生在当前total_points）
             double A_PAUSE = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points, 1, total_points);
+            double B_PAUSE = 1 - monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points, 2, total_points);
 
             // 输出结果（保留6位小数）
             std::cout << std::left
@@ -340,7 +349,8 @@ int main() {
                       << std::setw(15) << std::fixed << std::setprecision(6) << A_NO_PAUSE
                       << std::setw(15) << std::fixed << std::setprecision(6) << B_NO_PAUSE
                       << std::setw(15) << std::fixed << std::setprecision(6) << A_PAUSE
-                      << std::setw(15) << std::fixed << std::setprecision(6) << std::endl;
+                      << std::setw(15) << std::fixed << std::setprecision(6) << B_PAUSE
+                      << std::endl;
         }
     }
     return 0;
