@@ -5,6 +5,7 @@
 #include <random>
 #include <chrono>
 #include <cmath>
+#include <iomanip>
 
 // 随机数生成器
 std::mt19937 gen(std::chrono::system_clock().now().time_since_epoch().count());
@@ -149,7 +150,7 @@ void calc_momentum(std::vector<PointInfo>& points) {
     int last_idx = points.size() - 1;
     if (points.size() < WINDOW_SIZE) {
         points[last_idx].mom_avg1 = points[last_idx].mom_avg2 = 0.5;
-        return ;
+        return;
     }
 
     double avg1 = 0, numerator = 0, denominator = 0;
@@ -182,18 +183,17 @@ void read_PointInfo(char status, int game_idx, int& scrA, int& scrB, int total_p
     if (status == playerA.id) {
         scrA++;
         double alpha = calc_alpha(scrA, scrB);
-        playerA_points.emplace_back(1, game_idx, alpha, 0, 0, 0, a_advantage);
-        playerB_points.emplace_back(0, game_idx, alpha, 0, 0, 0, b_advantage);
+        playerA_points.emplace_back(1, game_idx, alpha, 0, 0, false, a_advantage);
+        playerB_points.emplace_back(0, game_idx, alpha, 0, 0, false, b_advantage);
     } else {
         scrB++;
         double alpha = calc_alpha(scrA, scrB);
-        playerA_points.emplace_back(0, game_idx, alpha, 0, 0, 0, a_advantage);
-        playerB_points.emplace_back(1, game_idx, alpha, 0, 0, 0, b_advantage);
+        playerA_points.emplace_back(0, game_idx, alpha, 0, 0, false, a_advantage);
+        playerB_points.emplace_back(1, game_idx, alpha, 0, 0, false, b_advantage);
     }
     calc_momentum(playerA_points);
     calc_momentum(playerB_points);
 }
-
 
 double calc_elo(char id, int game_idx, int scrA, int scrB, Player& player, std::vector<PointInfo>& points) {
     int _player = (id == playerA.id) ? 1 : 2;
@@ -202,13 +202,29 @@ double calc_elo(char id, int game_idx, int scrA, int scrB, Player& player, std::
     double advantage = (points.empty() ? 0 : points.back().advantage);
     double momentum = (points.empty() ? 0 : points.back().mom_avg2);
 
-    return 0.4 * player.cap + 0.15 * player.ser * is_serve + 0.2 * ((calc_game_progress(scrA, scrB) > 0.95) ? player.psy : 1) + 0.1 * advantage + 0.15 * momentum; // parameter to be improved
+    return 0.4 * player.cap + 0.15 * player.ser * is_serve +
+           0.2 * ((calc_game_progress(scrA, scrB) > 0.95) ? player.psy : 1) +
+           0.1 * advantage + 0.15 * momentum;
 }
 
+/**
+ * @brief 蒙特卡洛模拟胜率（支持暂停场景）
+ * @param current_game 当前局数
+ * @param scrA 当前A得分
+ * @param scrB 当前B得分
+ * @param total_points 当前总分数
+ * @param historyA A的历史得分信息
+ * @param historyB B的历史得分信息
+ * @param pause_caller 暂停方：0=无暂停，1=A叫暂停，2=B叫暂停
+ * @param pause_total_points 暂停发生时的总分数
+ * @return A的胜率
+ */
 double monte_carlo_simulation(int current_game,
                               int scrA, int scrB, int total_points,
                               const std::vector<PointInfo>& historyA,
-                              const std::vector<PointInfo>& historyB) {
+                              const std::vector<PointInfo>& historyB,
+                              int pause_caller = 0,
+                              int pause_total_points = 0) {
 
     int a_wins = 0;
 
@@ -225,32 +241,42 @@ double monte_carlo_simulation(int current_game,
         int game_over = 0;
 
         while (!game_over) {
-            double eloA = 0.0;
-            double eloB = 0.0;
-
-            eloA = calc_elo(playerA.id, sim_game, sim_scrA, sim_scrB, playerA, sim_historyA);
-            eloB = calc_elo(playerB.id, sim_game, sim_scrA, sim_scrB, playerB, sim_historyB);
+            double eloA = calc_elo(playerA.id, sim_game, sim_scrA, sim_scrB, playerA, sim_historyA);
+            double eloB = calc_elo(playerB.id, sim_game, sim_scrA, sim_scrB, playerB, sim_historyB);
 
             double winA = eloA / (eloA + eloB);
-            double winB = eloB / (eloA + eloB);
-
             std::uniform_real_distribution<double> dis(0.0, 1.0);
             double rand_val = dis(gen);
 
-            bool a_won_point = false;
-            if (rand_val < winA) {
-                a_won_point = true;
-                sim_scrA++;
-            } else {
-                sim_scrB++;
-            }
+            bool a_won_point = rand_val < winA;
+            a_won_point ? sim_scrA++ : sim_scrB++;
             sim_total_points++;
 
+            // 计算暂停相关的参数
+            bool post_pause = false;
+            double a_advantage = 0.0, b_advantage = 0.0;
+            int delta = sim_total_points - pause_total_points; // 暂停后经过的分数
+
+            if (pause_caller != 0 && delta >= 0) {
+                post_pause = true;
+                if (pause_caller == 1) {
+                    // A叫暂停：A用pause优势，B用常规优势
+                    a_advantage = calc_pause_advantage(playerA.cld, delta);
+                    b_advantage = calc_regular_advantage(playerB.hot, sim_total_points);
+                } else if (pause_caller == 2) {
+                    // B叫暂停：B用pause优势，A用常规优势
+                    a_advantage = calc_regular_advantage(playerA.hot, sim_total_points);
+                    b_advantage = calc_pause_advantage(playerB.cld, delta);
+                }
+            } else {
+                // 无暂停：双方用常规优势
+                a_advantage = calc_regular_advantage(playerA.hot, sim_total_points);
+                b_advantage = calc_regular_advantage(playerB.hot, sim_total_points);
+            }
+
             double alpha = calc_alpha(sim_scrA, sim_scrB);
-            double a_advantage = calc_regular_advantage(playerA.hot, sim_total_points);
-            double b_advantage = calc_regular_advantage(playerB.hot, sim_total_points);
-            sim_historyA.emplace_back(a_won_point, sim_game, alpha, 0, 0, 0, a_advantage);
-            sim_historyB.emplace_back(!a_won_point, sim_game, alpha, 0, 0, 0, b_advantage);
+            sim_historyA.emplace_back(a_won_point, sim_game, alpha, 0, 0, post_pause, a_advantage);
+            sim_historyB.emplace_back(!a_won_point, sim_game, alpha, 0, 0, post_pause, b_advantage);
 
             calc_momentum(sim_historyA);
             calc_momentum(sim_historyB);
@@ -260,13 +286,22 @@ double monte_carlo_simulation(int current_game,
         }
     }
 
-    return 1. * a_wins / SIMULATIONS;
+    return static_cast<double>(a_wins) / SIMULATIONS;
 }
 
 int main() {
     std::vector<std::string> game_seqs = get_game_score_seqs();
     int total_points = 0;
-    printf("POINT_ID\tGAME_ID\t\tscrA\t\tscrB\t\tA\t\t\tB\n");
+    // 设置输出格式，对齐列头
+    std::cout << std::left
+              << std::setw(10) << "POINT_ID"
+              << std::setw(10) << "GAME_ID"
+              << std::setw(10) << "scrA"
+              << std::setw(10) << "scrB"
+              << std::setw(15) << "A_NO_PAUSE"
+              << std::setw(15) << "B_NO_PAUSE"
+              << std::setw(15) << "A_PAUSE" << std::endl;
+    std::cout << std::string(90, '-') << std::endl;
 
     for (int game_idx = 0; game_idx < game_seqs.size(); game_idx++) {
         const std::string& seq = game_seqs[game_idx];
@@ -277,17 +312,36 @@ int main() {
             read_PointInfo(seq[point_idx], game_idx, scrA, scrB, total_points);
 
             if (total_points < 4) {
-                printf("#%d\t\t#%d\t\t%d\t\t%d\t\tundefined\t\tundefined\n", total_points, game_idx, scrA, scrB);
+                // 总分数不足4时，胜率为undefined
+                std::cout << std::left
+                          << std::setw(10) << total_points
+                          << std::setw(10) << game_idx
+                          << std::setw(10) << scrA
+                          << std::setw(10) << scrB
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined" << std::endl;
                 continue;
             }
 
-            double A_NO_PAUSE_WINNING_RATE = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points);
-            double B_NO_PAUSE_WINNING_RATE = 1 - A_NO_PAUSE_WINNING_RATE;
+            // 1. 无暂停场景的胜率
+            double A_NO_PAUSE = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points);
+            double B_NO_PAUSE = 1 - A_NO_PAUSE;
 
-            printf("#%d\t\t#%d\t\t%d\t\t%d\t\t%lf\t\t%lf\n", total_points, game_idx, scrA, scrB, A_NO_PAUSE_WINNING_RATE, B_NO_PAUSE_WINNING_RATE);
+            // 2. A叫暂停的胜率（pause_caller=1，暂停发生在当前total_points）
+            double A_PAUSE = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points, 1, total_points);
+
+            // 输出结果（保留6位小数）
+            std::cout << std::left
+                      << std::setw(10) << total_points
+                      << std::setw(10) << game_idx
+                      << std::setw(10) << scrA
+                      << std::setw(10) << scrB
+                      << std::setw(15) << std::fixed << std::setprecision(6) << A_NO_PAUSE
+                      << std::setw(15) << std::fixed << std::setprecision(6) << B_NO_PAUSE
+                      << std::setw(15) << std::fixed << std::setprecision(6) << A_PAUSE
+                      << std::setw(15) << std::fixed << std::setprecision(6) << std::endl;
         }
     }
     return 0;
 }
-
-/* no_pause_reservation */
