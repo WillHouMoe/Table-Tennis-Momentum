@@ -6,9 +6,6 @@
 #include <chrono>
 #include <cmath>
 #include <iomanip>
-#include <queue>
-#include <vector>
-#include <cmath> // 用于isnan
 
 // 随机数生成器
 std::mt19937 gen(std::chrono::system_clock().now().time_since_epoch().count());
@@ -205,9 +202,9 @@ double calc_elo(char id, int game_idx, int scrA, int scrB, Player& player, std::
     double advantage = (points.empty() ? 0 : points.back().advantage);
     double momentum = (points.empty() ? 0 : points.back().mom_avg2);
 
-    return 0.4 * player.cap + 0.1 * player.ser * is_serve +
-           0.15 * ((calc_game_progress(scrA, scrB) > 0.95) ? player.psy : 1) +
-           0.15 * advantage + 0.2 * momentum;
+    return 0.4 * player.cap + 0.15 * player.ser * is_serve +
+           0.2 * ((calc_game_progress(scrA, scrB) > 0.95) ? player.psy : 1) +
+           0.1 * advantage + 0.15 * momentum;
 }
 
 /**
@@ -296,50 +293,25 @@ double monte_carlo_simulation(int current_game,
     return static_cast<double>(a_wins) / SIMULATIONS;
 }
 
-// 格式化输出Python列表的函数
-void print_python_list(const std::string& var_name, const std::vector<double>& data) {
-    std::cout << var_name << " = [" << std::endl << "    ";
-    int count = 0;
-    int line_size = 12; // 每行显示12个元素，与示例对齐
-    for (size_t i = 0; i < data.size(); i++) {
-        if (std::isnan(data[i])) {
-            std::cout << "None";
-        } else {
-            // 适配示例的数值格式：整数直接输出，否则保留4位小数
-            if (data[i] == floor(data[i])) {
-                std::cout << static_cast<int>(data[i]);
-            } else {
-                std::cout << std::fixed << std::setprecision(4) << data[i];
-            }
-        }
-        // 最后一个元素不加逗号，其余加
-        if (i != data.size() - 1) {
-            std::cout << ",";
-        }
-        count++;
-        // 每行末尾换行，加缩进
-        if (count % line_size == 0 && i != data.size() - 1) {
-            std::cout << std::endl << "    ";
-        } else if (i != data.size() - 1) {
-            std::cout << "";
-        }
-    }
-    std::cout << std::endl << "]" << std::endl << std::endl;
-}
-
 int main() {
     std::vector<std::string> game_seqs = get_game_score_seqs();
     int total_points = 0;
     double A_DELTA_MAX = -1, B_DELTA_MAX = -1;
     int A_DELTA_MAX_ID, B_DELTA_MAX_ID;
-
-    // ========== 定义8个指标的存储容器，初始化为NaN（对应None） ==========
-    std::vector<double> A_MOMENTUM, B_MOMENTUM;
-    std::vector<double> A_NOPAUSE, B_NOPAUSE;
-    std::vector<double> A_PAUSE, B_PAUSE;
-    std::vector<double> A_DELTA, B_DELTA;
-
-    std::queue<int> game_seperate;
+    // 设置输出格式，对齐列头
+    std::cout << std::left
+              << std::setw(10) << "POINT_ID"
+              << std::setw(10) << "GAME_ID"
+              << std::setw(10) << "scrA"
+              << std::setw(10) << "scrB"
+              << std::setw(15) << "A_NO_PAUSE"
+              << std::setw(15) << "B_NO_PAUSE"
+              << std::setw(15) << "A_PAUSE"
+              << std::setw(15) << "B_PAUSE"
+              << std::setw(15) << "A_DELTA"
+              << std::setw(15) << "B_DELTA"
+              << std::endl;
+    std::cout << std::string(90, '-') << std::endl;
 
     for (int game_idx = 0; game_idx < game_seqs.size(); game_idx++) {
         const std::string& seq = game_seqs[game_idx];
@@ -349,65 +321,59 @@ int main() {
             total_points++;
             read_PointInfo(seq[point_idx], game_idx, scrA, scrB, total_points);
 
-            // ========== 收集数据：前3个点为NaN（对应None） ==========
             if (total_points < 4) {
-                A_MOMENTUM.push_back(NAN);
-                B_MOMENTUM.push_back(NAN);
-                A_NOPAUSE.push_back(NAN);
-                B_NOPAUSE.push_back(NAN);
-                A_PAUSE.push_back(NAN);
-                B_PAUSE.push_back(NAN);
-                A_DELTA.push_back(NAN);
-                B_DELTA.push_back(NAN);
+                // 总分数不足4时，胜率为undefined
+                std::cout << std::left
+                          << std::setw(10) << total_points
+                          << std::setw(10) << game_idx
+                          << std::setw(10) << scrA
+                          << std::setw(10) << scrB
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined"
+                          << std::setw(15) << "undefined"
+                          << std::endl;
                 continue;
             }
 
-            // ========== 计算8个核心指标 ==========
-            double a_mom = playerA_points.back().mom_avg2;
-            double b_mom = playerB_points.back().mom_avg2;
-            double a_no = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points);
-            double b_no = 1 - a_no;
-            double a_pause = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points, 1, total_points);
-            double b_pause = 1 - monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points, 2, total_points);
-            double a_delta = a_pause - a_no;
-            double b_delta = b_pause - b_no;
+            // 1. 无暂停场景的胜率
+            double A_NO_PAUSE = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points);
+            double B_NO_PAUSE = 1 - A_NO_PAUSE;
 
-            // ========== 存入容器 ==========
-            A_MOMENTUM.push_back(a_mom);
-            B_MOMENTUM.push_back(b_mom);
-            A_NOPAUSE.push_back(a_no);
-            B_NOPAUSE.push_back(b_no);
-            A_PAUSE.push_back(a_pause);
-            B_PAUSE.push_back(b_pause);
-            A_DELTA.push_back(a_delta);
-            B_DELTA.push_back(b_delta);
+            // 2. A叫暂停的胜率（pause_caller=1，暂停发生在当前total_points）
+            double A_PAUSE = monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points, 1, total_points);
+            double B_PAUSE = 1 - monte_carlo_simulation(game_idx, scrA, scrB, total_points, playerA_points, playerB_points, 2, total_points);
 
-            // 更新最大暂停收益
-            if (a_delta > A_DELTA_MAX) {
-                A_DELTA_MAX = a_delta;
+            double A_DELTA = A_PAUSE - A_NO_PAUSE;
+            double B_DELTA = B_PAUSE - B_NO_PAUSE;
+            if (A_DELTA > A_DELTA_MAX) {
+                A_DELTA_MAX = A_DELTA;
                 A_DELTA_MAX_ID = total_points;
             }
-            if (b_delta > B_DELTA_MAX) {
-                B_DELTA_MAX = b_delta;
+            if (B_DELTA > B_DELTA_MAX) {
+                B_DELTA_MAX = B_DELTA;
                 B_DELTA_MAX_ID = total_points;
             }
+            // 输出结果（保留6位小数）
+            std::cout << std::left
+                      << std::setw(10) << total_points
+                      << std::setw(10) << game_idx
+                      << std::setw(10) << scrA
+                      << std::setw(10) << scrB
+                      << std::setw(15) << std::fixed << std::setprecision(6) << A_NO_PAUSE
+                      << std::setw(15) << std::fixed << std::setprecision(6) << B_NO_PAUSE
+                      << std::setw(15) << std::fixed << std::setprecision(6) << A_PAUSE
+                      << std::setw(15) << std::fixed << std::setprecision(6) << B_PAUSE
+                      << std::setw(15) << std::fixed << std::setprecision(6) << A_DELTA
+                      << std::setw(15) << std::fixed << std::setprecision(6) << B_DELTA
+                      << std::endl;
         }
-        game_seperate.emplace(total_points);
     }
-
-    // ========== 按Python列表格式输出8个指标 ==========
-    print_python_list("A_MOMENTUM", A_MOMENTUM);
-    print_python_list("B_MOMENTUM", B_MOMENTUM);
-    print_python_list("A_NOPAUSE", A_NOPAUSE);
-    print_python_list("B_NOPAUSE", B_NOPAUSE);
-    print_python_list("A_PAUSE", A_PAUSE);
-    print_python_list("B_PAUSE", B_PAUSE);
-    print_python_list("A_DELTA", A_DELTA);
-    print_python_list("B_DELTA", B_DELTA);
-
-    // 输出最大暂停收益信息（可选）
-    std::cout << "A_DELTA_MAX = " << std::fixed << std::setprecision(4) << A_DELTA_MAX << " (POINT_ID: " << A_DELTA_MAX_ID << ")" << std::endl;
-    std::cout << "B_DELTA_MAX = " << std::fixed << std::setprecision(4) << B_DELTA_MAX << " (POINT_ID: " << B_DELTA_MAX_ID << ")" << std::endl;
-
+    std::cout << "A_DELTA_MAX = " << A_DELTA_MAX << std::endl;
+    std::cout << "A_DELTA_MAX_ID = " << A_DELTA_MAX_ID << std::endl;
+    std::cout << "B_DELTA_MAX = " << B_DELTA_MAX << std::endl;
+    std::cout << "B_DELTA_MAX_ID = " << B_DELTA_MAX_ID << std::endl;
     return 0;
 }

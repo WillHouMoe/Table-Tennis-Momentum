@@ -38,8 +38,8 @@ struct PointInfo {
 
 std::vector<Player> initializePlayers() {
     return {
-        {"Harimoto", 'H', 0.45, 0.5, 0.8, 0.15, 0.02},
-        {"Fan Zhendong", 'F', 0.55, 0.6, 0.9, 0.1, 0.02}
+        {"Harimoto", 'H', 0.45, 0.5, 0.8, 0.15, 0.04},
+        {"Fan Zhendong", 'F', 0.55, 0.6, 0.9, 0.1, 0.04}
     };
 }
 std::vector<Player> players = initializePlayers();
